@@ -5,6 +5,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
+RUN python3 -c 'import pathlib; p=pathlib.Path("/app/requirements.txt"); b=p.read_bytes(); p.write_bytes(b.decode("utf-16-le").encode("utf-8") if b"\x00" in b else b)' 2>/dev/null || true
 RUN pip install --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
