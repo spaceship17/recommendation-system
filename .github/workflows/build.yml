@@ -74,8 +74,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Normalize requirements.txt to UTF-8
+        run: |
+          python -c '
+          import pathlib
+          p = pathlib.Path("requirements.txt")
+          if not p.exists():
+            exit(0)
+          b = p.read_bytes()
+          if b"\x00" in b or (b[:2] == b"\xff\xfe" or b[:2] == b"\xfe\xff"):
+            try:
+              s = b.decode("utf-16-le")
+            except Exception:
+              s = b.decode("utf-16", errors="replace")
+            p.write_text(s, encoding="utf-8")
+            print("Converted requirements.txt to UTF-8")
+          '
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: pip install --upgrade pip && pip install -r requirements.txt
       - name: Import API
         run: python -c "from src.api.main import app; print('API OK')"
       - name: Pipeline config
