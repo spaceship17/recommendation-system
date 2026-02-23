@@ -1,0 +1,206 @@
+# Path-filtered DAG: build only what changed (or both on tag v*).
+#
+# Build API image when any of: src/, configs/, run_pipeline.py, requirements.txt,
+#   Dockerfile, data/, models/ (data, model, algo, deps).
+# Build UI image when: ui/.
+# No image build when only: README, *.md, docker-compose, .github, deployment yaml, etc.
+# Tag push (v*): always build both images.
+name: Build and push Docker images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+env:
+  GHCR_REGISTRY: ghcr.io
+  DOCKERHUB_REGISTRY: docker.io
+  IMAGE_API: movie-recommendation-api
+  IMAGE_UI: movie-recommendation-ui
+
+jobs:
+  # 1. Detect what changed (or tag = build both)
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      ui: ${{ steps.filter.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'src/**'
+              - 'configs/**'
+              - 'run_pipeline.py'
+              - 'requirements.txt'
+              - 'Dockerfile'
+              - 'data/**'
+              - 'models/**'
+            ui:
+              - 'ui/**'
+
+
+  # On tag push: build both. On branch: use path filter result.
+  set-build-flags:
+    runs-on: ubuntu-latest
+    needs: changes
+    outputs:
+      api: ${{ steps.out.outputs.api }}
+      ui: ${{ steps.out.outputs.ui }}
+    steps:
+      - id: out
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "api=true" >> $GITHUB_OUTPUT
+            echo "ui=true" >> $GITHUB_OUTPUT
+          else
+            echo "api=${{ needs.changes.outputs.api }}" >> $GITHUB_OUTPUT
+            echo "ui=${{ needs.changes.outputs.ui }}" >> $GITHUB_OUTPUT
+          fi
+
+  # 2. Lint/import check (only when something to build)
+  check:
+    runs-on: ubuntu-latest
+    needs: set-build-flags
+    if: needs.set-build-flags.outputs.api == 'true' || needs.set-build-flags.outputs.ui == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Import API
+        run: python -c "from src.api.main import app; print('API OK')"
+      - name: Pipeline config
+        run: python -c "from run_pipeline import load_config; load_config('configs/model_config.yaml'); print('Pipeline OK')"
+
+  # 3. Compute version tag (only when we have something to build and check passed)
+  set-version:
+    runs-on: ubuntu-latest
+    needs: [set-build-flags, check]
+    if: (needs.set-build-flags.outputs.api == 'true' || needs.set-build-flags.outputs.ui == 'true') && needs.check.result == 'success'
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            V=$(cat VERSION 2>/dev/null || echo "1.0.0")
+            echo "tag=v${V}" >> $GITHUB_OUTPUT
+          fi
+
+  # 4. Build and push API image (only when api-related paths or tag)
+  push-api:
+    needs: [set-build-flags, set-version]
+    if: needs.set-build-flags.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tags for API
+        id: tags-api
+        run: |
+          TAG="${{ needs.set-version.outputs.tag }}"
+          echo "ghcr=${{ env.GHCR_REGISTRY }}/${{ github.repository }}/api:$TAG" >> $GITHUB_OUTPUT
+          echo "ghcr_latest=${{ env.GHCR_REGISTRY }}/${{ github.repository }}/api:latest" >> $GITHUB_OUTPUT
+          echo "dh=${{ env.DOCKERHUB_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_API }}:$TAG" >> $GITHUB_OUTPUT
+          echo "dh_latest=${{ env.DOCKERHUB_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_API }}:latest" >> $GITHUB_OUTPUT
+
+      - name: Build and push API (GHCR + Docker Hub)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ steps.tags-api.outputs.ghcr }}
+            ${{ steps.tags-api.outputs.ghcr_latest }}
+            ${{ steps.tags-api.outputs.dh }}
+            ${{ steps.tags-api.outputs.dh_latest }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 5. Build and push UI image (only when ui-related paths or tag)
+  push-ui:
+    needs: [set-build-flags, set-version]
+    if: needs.set-build-flags.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tags for UI
+        id: tags-ui
+        run: |
+          TAG="${{ needs.set-version.outputs.tag }}"
+          echo "ghcr=${{ env.GHCR_REGISTRY }}/${{ github.repository }}/ui:$TAG" >> $GITHUB_OUTPUT
+          echo "ghcr_latest=${{ env.GHCR_REGISTRY }}/${{ github.repository }}/ui:latest" >> $GITHUB_OUTPUT
+          echo "dh=${{ env.DOCKERHUB_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_UI }}:$TAG" >> $GITHUB_OUTPUT
+          echo "dh_latest=${{ env.DOCKERHUB_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_UI }}:latest" >> $GITHUB_OUTPUT
+
+      - name: Build and push UI (GHCR + Docker Hub)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./ui/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.tags-ui.outputs.ghcr }}
+            ${{ steps.tags-ui.outputs.ghcr_latest }}
+            ${{ steps.tags-ui.outputs.dh }}
+            ${{ steps.tags-ui.outputs.dh_latest }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

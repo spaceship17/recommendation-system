@@ -1,0 +1,13 @@
+# Movie recommendation pipeline config
+data:
+  raw_file: "data/raw/top10K-TMDB-movies.csv"
+  processed_file: "data/processed/movies_cleaned.csv"
+  featured_file: "data/processed/movies_with_tags.csv"
+
+model:
+  max_features: 20000
+  stop_words: "english"
+  models_dir: "models/trained"
+  movies_dic_name: "movies_dic.pkl"
+  tag_similarity_name: "tag_similarity.pkl"
+  movies_name: "movies.pkl"

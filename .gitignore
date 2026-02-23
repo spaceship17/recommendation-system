@@ -1,5 +1,30 @@
+# Env and secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Python
 venv
-*.pkl
+.venv
 __pycache__/
 *.pyc
+*.pyo
+
+# Model artifacts (large; use DVC or mount in deploy)
+*.pkl
+
+# Data (large; use DVC or separate storage)
+data/
+
+# IDE / OS
 .DS_Store
+.idea/
+.devcontainer/
+
+# Notebooks (optional: remove if you want to track them)
+# *.ipynb
+
+# Allow these in repo
+!README.md
+!requirements.txt
+!VERSION

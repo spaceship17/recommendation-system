@@ -1,0 +1,30 @@
+# DVC pipeline: data -> features -> train (same DAG as run_pipeline.py).
+# Run: dvc repro
+# Ensure data/raw/top10K-TMDB-movies.csv exists (or dvc pull to get it).
+stages:
+  data:
+    cmd: python -m src.data.run_processing --input data/raw/top10K-TMDB-movies.csv --output data/processed/movies_cleaned.csv
+    deps:
+      - data/raw/top10K-TMDB-movies.csv
+      - src/data/run_processing.py
+    outs:
+      - data/processed/movies_cleaned.csv
+
+  features:
+    cmd: python -m src.features.engineer --input data/processed/movies_cleaned.csv --output data/processed/movies_with_tags.csv
+    deps:
+      - data/processed/movies_cleaned.csv
+      - src/features/engineer.py
+    outs:
+      - data/processed/movies_with_tags.csv
+
+  train:
+    cmd: python -m src.models.train_model --config configs/model_config.yaml --featured-csv data/processed/movies_with_tags.csv --models-dir models/trained
+    deps:
+      - data/processed/movies_with_tags.csv
+      - configs/model_config.yaml
+      - src/models/train_model.py
+    outs:
+      - models/trained/movies_dic.pkl
+      - models/trained/tag_similarity.pkl
+      - models/trained/movies.pkl

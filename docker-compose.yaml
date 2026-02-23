@@ -1,0 +1,33 @@
+# MLOps-style deploy: API (model serving) + UI (Streamlit).
+# Build from repo root:
+#   docker compose build
+# Run:
+#   docker compose up
+# Optional: run pipeline to (re)train before up:
+#   docker compose run --rm api python run_pipeline.py --config configs/model_config.yaml
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+    volumes:
+      # Mount trained models so you can update without rebuild (e.g. after run_pipeline)
+      - ./models/trained:/app/models/trained:ro
+
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+    volumes:
+      - ./models/trained:/app/models/trained:ro
+      - ./.env.dev:/app/.env.dev:ro
+    depends_on:
+      - api

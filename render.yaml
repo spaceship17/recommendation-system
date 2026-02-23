@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: movie-recommendation-system
-    env: python
-    buildCommand: pip install --prefer-binary -r requirements.txt
-    startCommand: streamlit run main.py
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.13 

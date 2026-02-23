@@ -1,0 +1,15 @@
+# MLOps Docker build: exclude heavy or irrelevant paths
+.git
+.gitignore
+.venv
+venv
+.env*
+*.ipynb
+notebooks
+__pycache__
+*.pyc
+.DS_Store
+.idea
+.devcontainer
+*.md
+!README.md
